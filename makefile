@@ -18,7 +18,7 @@ all: logtf-parser
 
 # Clean up anything that was produced by this makefile
 clean:
-	find . -name "*.o" -exec rm {} \; || true
+	rm logtf-parser.o
 	rm test_curl 2>/dev/null || true
 
 # test_curl will be the name of the binary, so it doesn't go in PHONY
