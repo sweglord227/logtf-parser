@@ -1,2 +1,2 @@
 # logtf-parser
-Made for a friend, serves as an example on how to read, write, and query apis using curl. as well as an intro to git for me
+Made for a friend, serves as a project which taught me how to read, write, query apis using curl, and parse jsons using cJSON. as well as an intro to git for me.
