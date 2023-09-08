@@ -3,80 +3,100 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <curl/curl.h>
-#include "json.h"
+#include <cjson/cJSON.h>
 
 
-struct string
+struct memory
 {
-	char *response;
+	char *content;
 	size_t size;
 };
-
-void init_string(struct string *s)
+ 
+static size_t cb(void *data, size_t size, size_t nmemb, void *clientp)
 {
-	s->size = 0;
-	s->response = malloc(s->size+1);
-	if (s->response == NULL)
-	{
-		fprintf(stderr, "Failed to allocate memory\n");
-		exit(1);
-	}
-	s->response[0] = '\0';
-}
-
-size_t writefunc(void *response, size_t size, size_t nmemb, struct string *s)
-{
-	size_t new_size = s->size + size*nmemb;
-	s->response = realloc(s->response, new_size+1);
-	if (s->response == NULL)
-	{
-		fprintf(stderr, "Failed to reallocate memory\n");
-		exit(1);
-	}
-	memcpy(s->response+s->size, response, size*nmemb);
-	s->response[new_size] = '\0';
-	s->size = new_size;
+	size_t realsize = size * nmemb;
+	struct memory *mem = (struct memory *)clientp;
 	
-	return size*nmemb;
+	char *ptr = realloc(mem->content, mem->size + realsize + 1);
+	if(ptr == NULL)
+		return 0;  /* out of memory! */
+	
+	mem->content = ptr;
+	memcpy(&(mem->content[mem->size]), data, realsize);
+	mem->size += realsize;
+	mem->content[mem->size] = 0;
+	
+	return realsize;
 }
 
 //query logs.tf/json/[logID] and give back json as output
-void parse_log(char *logID)
+int parse_log(char *logID)
 {
+	printf("Processing log %s...\n", logID);
 	CURL *curl = curl_easy_init();
 	if(curl) 
 	{
+		struct memory rawJson = {0};
 		//cat url
 		int size = sizeof("https://logs.tf/json/") + sizeof(logID);
 		char logURL[size];
 		strlcpy(logURL, "https://logs.tf/json/", size);
 		strlcat(logURL, logID, size);
 		
-		//query url
+		//curl options
 		CURLcode res;
 		curl_easy_setopt(curl, CURLOPT_URL, logURL);
-		res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, cb);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rawJson);
 		
+		//call url for json
+		res = curl_easy_perform(curl);
 		if(res)
 		{
 			curl_easy_strerror(res);
-			exit(1);
+			return -1;
 		}
+		
+		//parse json
+		cJSON *log = cJSON_ParseWithLength(rawJson.content, rawJson.size);
+		free(rawJson.content);
+		if (log == NULL)
+		{
+			const char *err = cJSON_GetErrorPtr();
+			if(err != NULL)
+				fprintf(stderr, "Error before: %s\n", err);
+			return -1;
+		}
+		
+		int r = cJSON_GetObjectItem(log, "length")->valueint;
+		if(!r)
+		{
+			fprintf(stderr, "Old log type unsupported");
+			return -1;
+		}
+		
+		//cleanup
+		cJSON_Delete(log);
+		curl_easy_cleanup(curl);
+		
+		printf("Match Time: %i sec\n", r);
+		return r;
 	}
 	else
 	{
 		fprintf(stderr, "Failed to init CUrl\n");
-		exit(1);
+		return -1;
 	}
 }
 
 //break loglist into usable urls and query for data
-int parse_file(FILE *logList)
+int scan_file(FILE *logList)
 {
 	int c;
 	int *line = malloc(sizeof(int));
 	int lineSize = 0;
+	int avgLength = 0;
+	int totalLines = 0;
 	
 	while( (c = getc(logList)) != EOF)
 	{
@@ -85,13 +105,13 @@ int parse_file(FILE *logList)
 		if(c == '\n' && lineSize > 0)
 		{
 			isNewline = true;
-			char logID[lineSize + 1];
+			char logID[lineSize];
 			for(int i = 0; i < lineSize; i++)
 			{
 				logID[i] = line[i];
 			}
 			logID[lineSize] = '\0';
-			parse_log(logID);
+			avgLength += parse_log(logID);
 		}
 		else
 			line[lineSize] = c;
@@ -101,6 +121,7 @@ int parse_file(FILE *logList)
 			free(line);
 			line = malloc(sizeof(int));
 			lineSize = 0;
+			totalLines++;
 		}
 		else
 		{
@@ -120,6 +141,11 @@ int parse_file(FILE *logList)
 	fclose(logList);
 	if(line)
 		free(line);
+	
+	if(totalLines > 0)
+		printf("%i seconds average per match\n", avgLength/totalLines);
+	else
+		printf("%i seconds in match\n", avgLength);
 	return 0;
 }
 
@@ -140,7 +166,7 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		r = parse_file(fopen(argv[1], "r"));
+		r = scan_file(fopen(argv[1], "r"));
 		if(r)
 		{
 			fprintf(stderr, "Failed to allocate memory\n");

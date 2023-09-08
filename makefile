@@ -29,7 +29,7 @@ logtf-parser: $(SRCS:.c=.o)
   # $^ means everything to the right of the colon
   # $@ means the name to the left of the colon
   # See how the *required* library goes here?
-	$(CC) $(CFLAGS) -lcurl $^ -o $@
+	$(CC) $(CFLAGS) -lcurl -lcjson $^ -o $@
 
 # This is a glob rule, it will create any unmatched .o requirement
 # It needs the .c file to exist as a requirement though
@@ -38,4 +38,4 @@ logtf-parser: $(SRCS:.c=.o)
 # If you have an include folder though, you would still add
 # "-Iinclude_folder" here
 	%.o: %.c
-	$(CC) $(CFLAGS) -c $^ -o $@
+	$(CC) $(CFLAGS) -c -I $^ -o $@
