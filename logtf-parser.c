@@ -11,6 +11,12 @@ struct memory
 	char *content;
 	size_t size;
 };
+
+struct matchInfo
+{
+	int length;
+	int numRounds;
+};
  
 static size_t cb(void *data, size_t size, size_t nmemb, void *clientp)
 {
@@ -19,7 +25,7 @@ static size_t cb(void *data, size_t size, size_t nmemb, void *clientp)
 	
 	char *ptr = realloc(mem->content, mem->size + realsize + 1);
 	if(ptr == NULL)
-		return 0;  /* out of memory! */
+		return 0;
 	
 	mem->content = ptr;
 	memcpy(&(mem->content[mem->size]), data, realsize);
@@ -29,63 +35,72 @@ static size_t cb(void *data, size_t size, size_t nmemb, void *clientp)
 	return realsize;
 }
 
-//query logs.tf/json/[logID] and give back json as output
-int parse_log(char *logID)
+//query https://logs.tf/json/[logID] and give back json as output
+struct matchInfo parse_log(char *logID)
 {
 	printf("Processing log %s...\n", logID);
+	
 	CURL *curl = curl_easy_init();
 	if(curl) 
 	{
 		struct memory rawJson = {0};
-		//cat url
 		int size = sizeof("https://logs.tf/json/") + sizeof(logID);
 		char logURL[size];
 		strlcpy(logURL, "https://logs.tf/json/", size);
 		strlcat(logURL, logID, size);
 		
-		//curl options
-		CURLcode res;
 		curl_easy_setopt(curl, CURLOPT_URL, logURL);
 		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, cb);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&rawJson);
 		
-		//call url for json
-		res = curl_easy_perform(curl);
-		if(res)
+		CURLcode res;
+		if( (res = curl_easy_perform(curl)) )
 		{
 			curl_easy_strerror(res);
-			return -1;
+			exit(1);
 		}
 		
-		//parse json
 		cJSON *log = cJSON_ParseWithLength(rawJson.content, rawJson.size);
-		free(rawJson.content);
+		
 		if (log == NULL)
 		{
 			const char *err = cJSON_GetErrorPtr();
 			if(err != NULL)
 				fprintf(stderr, "Error before: %s\n", err);
-			return -1;
+			exit(1);
 		}
 		
-		int r = cJSON_GetObjectItem(log, "length")->valueint;
-		if(!r)
+		struct matchInfo match = {0, 0};
+		match.length = cJSON_GetObjectItem(log, "length")->valueint;
+		if(!match.length)
 		{
 			fprintf(stderr, "Old log type unsupported");
-			return -1;
+			exit(1);
 		}
 		
-		//cleanup
+		cJSON *teamsJson = cJSON_GetObjectItem(log, "teams");
+		
+		for(int i = 0; i < 2; i++)
+		{
+			char *teamColor;
+			if(i)
+				teamColor = "Red";
+			else
+				teamColor = "Blue";
+			cJSON *team = cJSON_GetObjectItem(teamsJson, teamColor);
+			match.numRounds += cJSON_GetObjectItem(team, "score")->valueint;
+		}
+		
+		free(rawJson.content);
 		cJSON_Delete(log);
 		curl_easy_cleanup(curl);
 		
-		printf("Match Time: %i sec\n", r);
-		return r;
+		return match;
 	}
 	else
 	{
-		fprintf(stderr, "Failed to init CUrl\n");
-		return -1;
+		fprintf(stderr, "Failed to init cURL\n");
+		exit(1);
 	}
 }
 
@@ -95,8 +110,8 @@ int scan_file(FILE *logList)
 	int c;
 	int *line = malloc(sizeof(int));
 	int lineSize = 0;
-	int avgLength = 0;
-	int totalLines = 0;
+	int totalLogs = 0;
+	struct matchInfo match = {};
 	
 	while( (c = getc(logList)) != EOF)
 	{
@@ -105,13 +120,17 @@ int scan_file(FILE *logList)
 		if(c == '\n' && lineSize > 0)
 		{
 			isNewline = true;
+			
 			char logID[lineSize];
 			for(int i = 0; i < lineSize; i++)
 			{
 				logID[i] = line[i];
 			}
 			logID[lineSize] = '\0';
-			avgLength += parse_log(logID);
+			
+			struct matchInfo temp = parse_log(logID);
+			match.length += temp.length;
+			match.numRounds += temp.numRounds;
 		}
 		else
 			line[lineSize] = c;
@@ -121,7 +140,7 @@ int scan_file(FILE *logList)
 			free(line);
 			line = malloc(sizeof(int));
 			lineSize = 0;
-			totalLines++;
+			totalLogs++;
 		}
 		else
 		{
@@ -142,10 +161,15 @@ int scan_file(FILE *logList)
 	if(line)
 		free(line);
 	
-	if(totalLines > 0)
-		printf("%i seconds average per match\n", avgLength/totalLines);
+	if(totalLogs > 0)
+		printf("%i seconds average per match\n", match.length / totalLogs);
 	else
-		printf("%i seconds in match\n", avgLength);
+		printf("%i seconds in match\n", match.length);
+	
+	//cannot divide by zero. there must be a round to have a log.
+	printf("%i seconds average per round\n", match.length / match.numRounds);
+	printf("%i total rounds\n", match.numRounds);
+	
 	return 0;
 }
 
