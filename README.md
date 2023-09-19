@@ -1,2 +1,2 @@
 # logtf-parser
-Made for a friend, serves as a project which taught me how to read, write, query apis using curl, and parse jsons using cJSON. as well as an intro to git for me.
+Takes a file of https://logs.tf/ log IDs and gives averages of data. This is my first repo so please excuse any mishaps or weirdness.
