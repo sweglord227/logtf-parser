@@ -38,4 +38,4 @@ logtf-parser: $(SRCS:.c=.o)
 # If you have an include folder though, you would still add
 # "-Iinclude_folder" here
 	%.o: %.c
-	$(CC) $(CFLAGS) -c -I $^ -o $@
+	$(CC) $(CFLAGS) -c -I./src $^ -o $@
